@@ -224,8 +224,8 @@
      (om/build avatar (:user player) {:opts {:size 22}})
      (user-status-span player)
      (let [side (:side player)
-           faction (:faction player)
-           identity (:identity player)
+           faction (:faction (:identity (:deck player)))
+           identity (:title (:identity (:deck player)))
            specs (:allowspectator game)]
        (cond
          (and (some? faction) (not= "Neutral" faction) specs) (faction-icon faction identity)
@@ -457,7 +457,7 @@
                              name
                              "Deck selected")]])
                        (when-let [deck (:deck player)]
-                         [:div.float-right (deck-status-span sets deck true false)])
+                         [:div.float-right (deck-status-span sets deck true false true)])
                        (when (= (:user player) user)
                          [:span.fake-link.deck-load
                           {:data-target "#deck-select" :data-toggle "modal"
