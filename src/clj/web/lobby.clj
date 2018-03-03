@@ -9,7 +9,8 @@
             [game.main :as main]
             [monger.collection :as mc]
             [jinteki.cards :refer [all-cards]]
-            [jinteki.decks :as decks])
+            [jinteki.decks :as decks]
+            [clj-time.core :as t])
   (:import org.bson.types.ObjectId))
 
 ;; All games active on the server.
@@ -33,24 +34,25 @@
 
 (defn user-public-view
   "Strips private server information from a player map."
-  [player]
+  [started? player]
   (as-> player p
         (dissoc p :ws-id)
         (if-let [{:keys [_id] :as deck} (:deck p)]
           (assoc p :deck (select-keys (assoc deck :_id (str _id))
-                                      [:_id :status :name]))
-          p)
-      ))
+                                      (if started?
+                                        [:_id :status :name :identity]
+                                        [:_id :status :name])))
+          p)))
 
 (defn game-public-view
   "Strips private server information from a game map, preparing to send the game to clients."
-  [game]
+  [{:keys [started] :as game}]
   (-> game
-      (dissoc :state)
-      (update-in [:players] #(map user-public-view %))
-      (update-in [:original-players] #(map user-public-view %))
-      (update-in [:ending-players] #(map user-public-view %))
-      (update-in [:spectators] #(map user-public-view %))))
+      (dissoc :state :last-update)
+      (update-in [:players] #(map (partial user-public-view started) %))
+      (update-in [:original-players] #(map (partial user-public-view started) %))
+      (update-in [:ending-players] #(map (partial user-public-view started) %))
+      (update-in [:spectators] #(map (partial user-public-view started) %))))
 
 (let [lobby-update (atom true)
       lobby-updates (atom {})]
@@ -109,6 +111,14 @@
   (refresh-lobby :delete gameid)
   (swap! all-games dissoc gameid)
   (swap! old-states dissoc gameid))
+
+
+(defn clear-inactive-lobbies
+  "Called by a background thread to close lobbies that are inactive for some number of seconds."
+  [time-inactive]
+  (doseq [{:keys [gameid last-update] :as game} (vals @all-games)]
+    (when (and gameid (t/after? (t/now) (t/plus last-update (t/seconds time-inactive))))
+      (close-lobby game))))
 
 (defn remove-user
   "Removes the given client-id from the given gameid, whether it is a player or a spectator.
@@ -204,7 +214,8 @@
                                 :ws-id      client-id
                                 :side    side
                                 :options options}]
-              :spectators     []}]
+              :spectators     []
+              :last-update    (t/now)}]
     (swap! all-games assoc gameid game)
     (swap! client-gameids assoc client-id gameid)
     (ws/send! client-id [:lobby/select {:gameid gameid}])

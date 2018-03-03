@@ -208,15 +208,24 @@
                                                     (runner-install target {:host-card card})
                                                     (update! (assoc (get-card state card) :dheg-prog (:cid target))))}
                                   card nil))}
-                {:label "Host an installed program on Dhegdheer"
+                {:label "Host an installed program on Dhegdheer with [Credit] discount"
                  :req (req (empty? (:hosted card)))
-                 :prompt "Choose an installed program to host on Dhegdheer"
+                 :prompt "Choose an installed program to host on Dhegdheer with [Credit] discount"
                  :choices {:req #(and (is-type? % "Program")
                                       (installed? %))}
                  :msg (msg "host " (:title target) (when (-> target :cost pos?) ", lowering its cost by 1 [Credit]"))
                  :effect (effect (host card target)
                                  (when (-> target :cost pos?)
                                    (gain state side :credit 1))
+                                 (gain :memory (:memoryunits target))
+                                 (update! (assoc (get-card state card) :dheg-prog (:cid target))))}
+                {:label "Host an installed program on Dhegdheer"
+                 :req (req (empty? (:hosted card)))
+                 :prompt "Choose an installed program to host on Dhegdheer"
+                 :choices {:req #(and (is-type? % "Program")
+                                      (installed? %))}
+                 :msg (msg "host " (:title target) (when (-> target :cost pos?)))
+                 :effect (effect (host card target)
                                  (gain :memory (:memoryunits target))
                                  (update! (assoc (get-card state card) :dheg-prog (:cid target))))}]
     :events {:card-moved {:req (req (= (:cid target) (:dheg-prog (get-card state card))))
@@ -933,4 +942,43 @@
                    :counter-cost [:power 3]
                    :once :per-turn
                    :msg "gain [Click][Click]"
-                   :effect (effect (gain :click 2))}]}})
+                   :effect (effect (gain :click 2))}]}
+
+   "Wari"
+   (letfn [(prompt-for-subtype []
+             {:prompt "Choose a subtype"
+              :choices ["Barrier" "Code Gate" "Sentry"]
+              :delayed-completion true
+              :effect (req (when-completed (trash state side card {:unpreventable true})
+                             (continue-ability state side
+                                               (expose-and-maybe-bounce target)
+                                               card nil)))})
+           
+           (expose-and-maybe-bounce [chosen-subtype]
+             {:choices {:req #(and (ice? %) (not (rezzed? %)))}
+              :delayed-completion true
+              :msg (str "name " chosen-subtype)
+              :effect (req (when-completed (expose state side target)
+                             (do (if (and async-result
+                                          (has-subtype? target chosen-subtype))
+                                   (do (move state :corp target :hand)
+                                       (system-msg state :runner
+                                                   (str "add " (:title target) " to HQ"))))
+                                 (effect-completed state side eid))))})]
+     {:events {:successful-run
+              {:interactive (req true)
+               :delayed-completion true
+               :req (req (and (= target :hq)
+                              (first-successful-run-on-server? state :hq)
+                              (some #(and (ice? %) (not (rezzed? %)))
+                                    (all-installed state :corp))))
+               :effect (effect (continue-ability
+                                {:prompt "Use Wari?"
+                                 :choices ["Yes" "No"]
+                                 :delayed-completion true
+                                 :effect (req (if (= target "Yes")
+                                                (continue-ability state side
+                                                                  (prompt-for-subtype)
+                                                                  card nil)
+                                                (effect-completed state side eid)))}
+                                card nil))}}})})

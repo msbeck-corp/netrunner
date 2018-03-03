@@ -56,6 +56,21 @@
       (run-jack-out state)
       (is (= 2 (count(get-in @state [:runner :hand]))) "Runner took 1 net damage"))))
 
+(deftest armed-intimidation
+  ;; Armed intimidation choices
+  (do-game
+    (new-game (default-corp [(qty "Armed Intimidation" 2)])
+              (default-runner [(qty "Sure Gamble" 3) (qty "Diesel" 2)]))
+    (play-from-hand state :corp "Armed Intimidation" "New remote")
+    (score-agenda state :corp (get-content state :remote1 0))
+    (prompt-choice :runner "Take 2 tags")
+    (is (= 2 (:tag (get-runner))) "Runner took 2 tags from Armed Intimidation tag choice")
+    (play-from-hand state :corp "Armed Intimidation" "New remote")
+    (score-agenda state :corp (get-content state :remote2 0))
+    (is (= 5 (count (:hand (get-runner)))) "Runner has 5 cards before Armed Intimidation meat damage")
+    (prompt-choice :runner "Suffer 5 meat damage")
+    (is (= 0 (count (:hand (get-runner)))) "Runner has 0 cards after Armed Intimidation meat damage")))
+
 (deftest astro-script-token
   ;; AstroScript token placement
   (do-game
@@ -99,6 +114,23 @@
         (should-not-place token-astro hand-ice-wall " in hand")
         (should-place token-astro installed-ice-wall " that is installed")))))
 
+(deftest bacterial-programming-run
+  ;; Bacterial Programming - scoring should not cause a run to exist for runner.
+  (do-game
+    (new-game (default-corp [(qty "Bacterial Programming" 1) (qty "Hedge Fund" 1)])
+              (default-runner))
+    (starting-hand state :corp ["Bacterial Programming"])
+    (play-from-hand state :corp "Bacterial Programming" "New remote")
+    (let [bp (get-content state :remote1 0)]
+      (score-agenda state :corp bp)
+      (prompt-choice :corp "Yes")
+      (prompt-choice :corp "Done")
+      (prompt-choice :corp "Done")
+      (prompt-card :corp (first (:deck (get-corp))))
+      (prompt-choice :corp "Done")
+      (is (empty (:prompt (get-corp))) "Bacterial Programming prompts finished")
+      (is (not (:run @state)) "No run is active"))))
+
 (deftest braintrust
   ;; Braintrust - Discount ICE rez by 1 for every 2 over-advancements when scored
   (do-game
@@ -141,7 +173,7 @@
       (prompt-select :corp kati)
       (is (empty? (:prompt (get-runner))) "Fall Guy prevention didn't occur")
       (is (= 1 (count (:discard (get-runner)))) "Kati Jones trashed"))))
-	  
+
 (deftest corporate-sales-team
   ;; Corporate Sales Team - Places 10c on card, corp takes 1c on each turn start
   (do-game
@@ -152,11 +184,11 @@
     (score-agenda state :corp (get-content state :remote1 0))
 	(let [scored-cst (get-in @state [:corp :scored 0])]
 	  (core/end-turn state :corp nil)
-	  (core/start-turn state :runner nil)	
+	  (core/start-turn state :runner nil)
 	  (is (= 6 (:credit (get-corp))) "Increments at runner's start of turn")
 	  (is (= 9 (get-counters (refresh scored-cst) :credit)))
 	  (core/end-turn state :runner nil)
-	  (core/start-turn state :corp nil)	
+	  (core/start-turn state :corp nil)
 	  (is (= 7 (:credit (get-corp))) "Increments at corp's start of turn")
 	  (is (= 8 (get-counters (refresh scored-cst) :credit)))
 	)))
@@ -421,6 +453,20 @@
       (score-agenda state :corp ht)
       (is (= 12 (:credit (get-corp))) "Gain 7 credits")
       (is (= 1 (:bad-publicity (get-corp))) "Take 1 bad publicity"))))
+
+(deftest ikawah-project-not-stealing
+  ;; Ikawah Project - do not reveal when the Runner does not steal from R&D
+  (do-game
+    (new-game (default-corp [(qty "Ikawah Project" 2)])
+              (default-runner))
+    (take-credits state :corp)
+    (starting-hand state :corp ["Ikawah Project"])
+    (run-empty-server state "R&D")
+    (prompt-choice :runner "Don't steal")
+    (is (not (last-log-contains? state "not to pay to steal Ikawah Project")) "Ikawah Project should not be mentioned")
+    (run-empty-server state "HQ")
+    (prompt-choice :runner "Don't steal")
+    (is (last-log-contains? state "not to pay to steal Ikawah Project") "Ikawah Project should be mentioned")))
 
 (deftest labyrinthine-servers
   ;; Labyrinthine Servers - Prevent the Runner from jacking out as long as there is still a power counter
@@ -693,7 +739,7 @@
     (score-agenda state :corp (get-content state :remote4 0))
     (is (= 2 (:agenda-point (get-corp))))
     (is (= 3 (count (:discard (get-runner)))) "Dealt 3 net damage upon scoring")))
-	  
+
 (deftest posted-bounty-yes
   ;; Posted Bounty - Forfeiting takes 1 bad publicity
   (do-game
@@ -706,7 +752,7 @@
 	  (is (= 0 (:agenda-point (get-corp))) "Forfeiting Posted Bounty nullifies agenda points")
       (is (= 1 (:bad-publicity (get-corp))) "Forfeiting takes 1 bad publicity"))
 	  (is (= 1 (get-in @state [:runner :tag])) "Runner receives 1 tag forfeiting Posted Bounty")))
-	  
+
 (deftest posted-bounty-no
   ;; Posted Bounty - Choosing not to forfeit scores normally
   (do-game
@@ -864,6 +910,23 @@
     (is (= 2 (count (get-in @state [:corp :hand]))))
     (is (= 1 (count (get-in @state [:runner :hand]))))))
 
+(deftest research-grant-leela
+  ;; Research Grant - vs. Leela. Issue #3069.
+  (do-game
+    (new-game (default-corp [(qty "Research Grant" 2) (qty "Ice Wall" 2)])
+              (make-deck "Leela Patel: Trained Pragmatist" [(qty "Sure Gamble" 1)]))
+    (core/gain state :corp :click 1)
+    (play-from-hand state :corp "Research Grant" "New remote")
+    (play-from-hand state :corp "Research Grant" "New remote")
+    (play-from-hand state :corp "Ice Wall" "HQ")
+    (play-from-hand state :corp "Ice Wall" "R&D")
+    (score-agenda state :corp (get-content state :remote1 0))
+    (prompt-select :corp (get-content state :remote2 0))
+    (is (= 2 (count (:scored (get-corp)))) "2 copies of Research Grant scored")
+    (prompt-select :runner (get-ice state :hq 0))
+    (prompt-select :runner (get-ice state :rd 0))
+    (is (empty? (:effect-completed @state)) "All score and Leela effects resolved")))
+
 (deftest ssl-endorsement-scored
   ;; SSL Endorsement - gain credits when in corp score area before turn begins
   (do-game
@@ -930,6 +993,29 @@
     (take-credits state :runner)
 
     (is (empty? (:prompt (get-corp))) "Not prompted when out of money")))
+
+(deftest ssl-endorsement-scored-swapped
+  ;; SSL Endorsement - register event when agenda swapped with Turntable
+  ;; Regression test for #3114
+  (do-game
+    (new-game (default-corp [(qty "SSL Endorsement" 1) (qty "Breaking News" 1)])
+              (default-runner [(qty "Turntable" 1)]))
+    (play-from-hand state :corp "Breaking News" "New remote")
+    (score-agenda state :corp (find-card "SSL Endorsement" (:hand (get-corp))))
+    (take-credits state :corp)
+
+    (play-from-hand state :runner "Turntable")
+    (run-on state "Server 1")
+    (run-successful state)
+    (prompt-choice :runner "Steal")
+    (prompt-choice :runner "Yes")                           ;; Swap BN with SSL
+    (prompt-select :runner (find-card "SSL Endorsement" (:scored (get-corp))))
+    (take-credits state :runner)
+
+    (is (not-empty (:prompt (get-corp))) "Corp prompted to take credits")
+    (is (= 7 (:credit (get-corp))) "Corp starts with 7 credits")
+    (prompt-choice :corp "Yes")
+    (is (= 10 (:credit (get-corp))) "Corp gains 3 credits from Turntable'd SSL Endorsement")))
 
 (deftest ssl-endorsement-stolen-swapped
   ;; SSL Endorsement - don't double register event when agenda is swapped

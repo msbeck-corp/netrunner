@@ -641,9 +641,10 @@
    (let [ability {:msg "gain 1 [Credits] and draw 1 card"
                   :label "Gain 1 [Credits] and draw 1 card (start of turn)"
                   :once :per-turn
+                  :delayed-completion true
                   :req (req (:corp-phase-12 @state))
                   :effect (effect (gain :credit 1)
-                                  (draw))}]
+                                  (draw eid 1 nil))}]
      {:derezzed-events {:runner-turn-ends corp-rez-toast}
       :events {:corp-turn-begins ability}
       :abilities [ability]
@@ -702,8 +703,11 @@
       :leave-play cleanup
       :trash-effect {:effect cleanup}
       :events {:corp-spent-click
-               {:effect (req (update! state side (update-in card [:seen-this-turn target] (fnil + 0) (second targets)))
-                             (when (>= (get-in (get-card state card) [:seen-this-turn target]) 3)
+               {:effect (req (when-not target
+                               (print-stack-trace (Exception. (str "WHY JEEVES WHY: " targets))))
+                             (update! state side (update-in card [:seen-this-turn (or target :this-is-a-hack)]
+                                                            (fnil + 0) (second targets)))
+                             (when (>= (get-in (get-card state card) [:seen-this-turn (or target :this-is-a-hack)]) 3)
                                (resolve-ability state side ability card nil)))}
                :corp-turn-ends {:effect cleanup}}})
 
@@ -717,6 +721,21 @@
                  :msg (msg "trash " (:title (first (:deck runner))) " from the Runner's Stack")
                  :effect (effect (mill :runner)
                                  (trash card {:cause :ability-cost}))}]}
+
+   "Kuwinda K4H1U3"
+   (let [ability {:trace {:base (req (get-in card [:counter :power] 0))
+                          :delayed-completion true
+                          :effect (effect (damage :runner eid :brain 1)
+                                          (trash card))
+                          :msg "do 1 brain damage"
+                          :unsuccessful {:effect (effect (add-counter card :power 1)
+                                                         (system-msg "adds 1 power counter to Kuwinda K4H1U3"))}}}]
+     {:derezzed-events {:runner-turn-ends corp-rez-toast}
+      :events {:corp-turn-begins
+               {:optional {:prompt "Initiate trace with Kuwinda K4H1U3?"
+                           :delayed-completion true
+                           :yes-ability ability}}}
+      :abilities [(assoc ability :label "Trace X - do 1 brain damage (start of turn)")]})
 
    "Lakshmi Smartfabrics"
    {:events {:rez {:effect (effect (add-counter card :power 1))}}
@@ -756,7 +775,8 @@
                                  (move target :hand))}]}
 
    "Lily Lockwell"
-   {:effect (effect (draw 3))
+   {:delayed-completion true
+    :effect (effect (draw eid 3 nil))
     :msg (msg "draw 3 cards")
     :abilities [{:label "Remove a tag to search R&D for an operation"
                  :prompt "Choose an operation to put on top of R&D"
@@ -993,9 +1013,9 @@
               :label (str "[Trash]: Gain " cred " [Credits]")
               :msg (str "gain " cred " [Credits]")})]
      {:advanceable :always
-      :abilities [(builder 1 5) 
+      :abilities [(builder 1 5)
                   (builder 2 8)]})
-   
+
    "Open Forum"
    {:events {:corp-mandatory-draw {:msg (msg (let [deck (:deck corp)]
                                                (if (pos? (count deck))
@@ -1046,6 +1066,15 @@
       :flags {:corp-phase-12 (req true)}
       :events {:corp-turn-begins ability}
       :abilities [ability]})
+
+   "Personalized Portal"
+   {:events {:corp-turn-begins {:effect (req (draw state :runner 1)
+                                             (let [cnt (count (get-in @state [:runner :hand]))
+                                                   credits (quot cnt 2)]
+                                               (gain state :corp :credit credits)
+                                               (system-msg state :corp
+                                                           (str "uses Personalized Portal to force the runner to draw "
+                                                                "1 card and gains " credits " [Credits]"))))}}}
 
    "Plan B"
    (advance-ambush
@@ -1451,6 +1480,19 @@
                                  (shuffle! :deck)
                                  (corp-install target nil))}]}
 
+   "TechnoCo"
+   (letfn [(is-techno-target [card]
+             (or (is-type? card "Program")
+                 (is-type? card "Hardware")
+                 (and (is-type? card "Resource") (has-subtype? card "Virtual"))))]
+     {:events {:pre-install {:req (req (and (is-techno-target target)
+                                            (not (second targets)))) ; not facedown
+                             :effect (effect (install-cost-bonus [:credit 1]))}
+               :runner-install {:req (req (and (is-techno-target target)
+                                               (not (second targets)))) ; not facedown
+                                :msg "gain 1 [Credits]"
+                                :effect (req (gain state :corp :credit 1))}}})
+
    "Tenma Line"
    {:abilities [{:label "Swap 2 pieces of installed ICE"
                  :cost [:click 1]
@@ -1458,7 +1500,10 @@
                  :choices {:req #(and (installed? %) (ice? %)) :max 2}
                  :effect (req (when (= (count targets) 2)
                                 (swap-ice state side (first targets) (second targets))))
-                 :msg "swap the positions of two ICE"}]}
+                 :msg (msg "swap the positions of "
+                           (card-str state (first targets))
+                           " and "
+                           (card-str state (second targets)))}]}
 
    "Test Ground"
    {:implementation "Derez is manual"

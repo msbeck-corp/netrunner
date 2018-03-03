@@ -85,7 +85,8 @@
 
    "Anonymous Tip"
    {:msg "draw 3 cards"
-    :effect (effect (draw 3))}
+    :delayed-completion true
+    :effect (effect (draw eid 3 nil))}
 
    "Archived Memories"
    {:effect (req (let [cid (:cid card)]
@@ -213,7 +214,9 @@
 
    "Blue Level Clearance"
    {:msg "gain 5 [Credits] and draw 2 cards"
-    :effect (effect (gain :credit 5) (draw 2))}
+    :delayed-completion true
+    :effect (effect (gain :credit 5)
+                    (draw eid 2 nil))}
 
    "BOOM!"
    {:req (req (> (:tag runner) 1))
@@ -292,11 +295,20 @@
 
    "Corporate Shuffle"
    {:msg "shuffle all cards in HQ into R&D and draw 5 cards"
-    :effect (effect (shuffle-into-deck :hand) (draw 5))}
+    :delayed-completion true
+    :effect (effect (shuffle-into-deck :hand)
+                    (draw eid 5 nil))}
 
    "Cyberdex Trial"
    {:msg "purge virus counters"
     :effect (effect (purge))}
+
+   "Death and Taxes"
+   (let [gain-cred-effect {:msg "gain 1 [Credits]"
+                           :effect (effect (gain :corp :credit 1))}]
+     {:implementation "Credit gain mandatory to save on wait-prompts, adjust credits manually if credit not wanted."
+      :events {:runner-install gain-cred-effect
+               :runner-trash gain-cred-effect}})
 
    "Dedication Ceremony"
    {:prompt "Select a faceup card"
@@ -365,9 +377,10 @@
                    (filter #(not (= (:cid %) (:cid card))))
                    (count)
                    (pos?)))
+    :delayed-completion true
     :msg (msg "trash all cards in HQ and draw 5 cards")
     :effect (effect (trash-cards (get-in @state [:corp :hand]))
-                    (draw 5))}
+                    (draw eid 5 nil))}
 
    "Enforced Curfew"
    {:msg "reduce the Runner's maximum hand size by 1"
@@ -517,7 +530,9 @@
 
    "Green Level Clearance"
    {:msg "gain 3 [Credits] and draw 1 card"
-    :effect (effect (gain :credit 3) (draw))}
+    :delayed-completion true
+    :effect (effect (gain :credit 3)
+                    (draw eid 1 nil))}
 
    "Hard-Hitting News"
    {:req (req (:made-run runner-reg-last))
@@ -550,10 +565,10 @@
      {:additional-cost [:mill 1]
       :delayed-completion true
       :msg "trash the top card of R&D, draw 3 cards, and add 3 cards in HQ to the top of R&D"
-      :effect (req (draw state side 3)
-                   (show-wait-prompt state :runner "Corp to add 3 cards in HQ to the top of R&D")
-                   (let [from (get-in @state [:corp :hand])]
-                     (continue-ability state :corp (hr-choice from '() 3 from) card nil)))})
+      :effect (req (when-completed (draw state side 3 nil)
+                                   (do (show-wait-prompt state :runner "Corp to add 3 cards in HQ to the top of R&D")
+                                       (let [from (get-in @state [:corp :hand])]
+                                         (continue-ability state :corp (hr-choice from '() 3 from) card nil)))))})
 
    "Hatchet Job"
    {:trace {:base 5
@@ -594,14 +609,14 @@
 
    "Heritage Committee"
    {:delayed-completion true
-    :effect (effect (draw 3)
-                    (continue-ability
-                      {:prompt "Select a card in HQ to put on top of R&D"
-                       :choices {:req #(and (= (:side %) "Corp")
-                                            (in-hand? %))}
-                       :msg "draw 3 cards and add 1 card from HQ to the top of R&D"
-                       :effect (effect (move target :deck {:front true}))}
-                      card nil))}
+    :effect (req (when-completed (draw state side 3 nil)
+                                 (continue-ability state side
+                                   {:prompt "Select a card in HQ to put on top of R&D"
+                                    :choices {:req #(and (= (:side %) "Corp")
+                                                         (in-hand? %))}
+                                    :msg "draw 3 cards and add 1 card from HQ to the top of R&D"
+                                    :effect (effect (move target :deck {:front true}))}
+                                   card nil)))}
 
    "Housekeeping"
    {:events {:runner-install {:player :runner
@@ -1108,6 +1123,25 @@
                       :effect (effect (trash-cards targets)
                                       (gain :credit (* 2 (count targets))))} card nil)))}
 
+   "Reverse Infection"
+   {:prompt "Choose One:"
+    :choices ["Purge virus counters."
+              "Gain 2 [Credits]"]
+    :effect (req (if (= target "Gain 2 [Credits]")
+                   (do (gain state side :credit 2)
+                       (system-msg state side "uses Reverse Infection to gain 2 [Credits]"))
+                   (let [pre-purge-virus (number-of-virus-counters state)]
+                     (purge state side)
+                     (let [post-purge-virus (number-of-virus-counters state)
+                           num-virus-purged (- pre-purge-virus post-purge-virus)
+                           num-to-trash (quot num-virus-purged 3)]
+                       (mill state :runner num-to-trash)
+                       (system-msg state side (str "uses Reverse Infection to purge "
+                                                   num-virus-purged (pluralize " virus counter" num-virus-purged)
+                                                   " and trash "
+                                                   num-to-trash (pluralize " card" num-to-trash)
+                                                   " from the top of the stack"))))))}
+
    "Rework"
    {:prompt "Select a card from HQ to shuffle into R&D"
     :choices {:req #(and (= (:side %) "Corp")
@@ -1287,11 +1321,11 @@
               :req #(and (= (:side %) "Corp")
                          (in-hand? %))}
     :msg (msg "shuffle " (count targets) " cards in HQ into R&D and draw " (count targets) " cards")
+    :delayed-completion true
     :effect (req (doseq [c targets]
                    (move state side c :deck))
                  (shuffle! state side :deck)
-                 (draw state side (count targets))
-                 (effect-completed state side eid card))}
+                 (draw state side eid (count targets) nil))}
 
    "Stock Buy-Back"
    {:msg (msg "gain " (* 3 (count (:scored runner))) " [Credits]")
@@ -1492,18 +1526,20 @@
    "Ultraviolet Clearance"
    {:delayed-completion true
     :effect (req (gain state side :credit 10)
-                 (draw state side 4)
-                 (continue-ability state side
-                   {:prompt "Choose a card in HQ to install"
-                    :choices {:req #(and (in-hand? %) (= (:side %) "Corp") (not (is-type? % "Operation")))}
-                    :msg "gain 10 [Credits], draw 4 cards, and install 1 card from HQ"
-                    :cancel-effect (req (effect-completed state side eid))
-                    :effect (effect (corp-install target nil))}
-                  card nil))}
+                 (when-completed (draw state side 4 nil)
+                                 (continue-ability state side
+                                                   {:prompt "Choose a card in HQ to install"
+                                                    :choices {:req #(and (in-hand? %) (= (:side %) "Corp") (not (is-type? % "Operation")))}
+                                                    :msg "gain 10 [Credits], draw 4 cards, and install 1 card from HQ"
+                                                    :cancel-effect (req (effect-completed state side eid))
+                                                    :effect (effect (corp-install target nil))}
+                                                   card nil)))}
 
    "Violet Level Clearance"
    {:msg "gain 8 [Credits] and draw 4 cards"
-    :effect (effect (gain :credit 8) (draw 4))}
+    :delayed-completion true
+    :effect (effect (gain :credit 8)
+                    (draw eid 4 nil))}
 
    "Voter Intimidation"
    {:req (req (seq (:scored runner)))

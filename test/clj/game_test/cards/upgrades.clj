@@ -311,6 +311,34 @@
       (is (= 1 (:tag (get-runner)))
           "Runner took 1 tag given from successful trace during run on ChiLo server"))))
 
+(deftest code-replicator
+  ;; Code Replicator - trash to make runner approach passed (rezzed) ice again
+  (do-game
+    (new-game (default-corp [(qty "Ice Wall" 3) (qty "Code Replicator" 1)])
+              (default-runner))
+    (core/gain state :corp :click 1)
+    (core/gain state :corp :credit 5)
+    (play-from-hand state :corp "Ice Wall" "HQ")
+    (play-from-hand state :corp "Ice Wall" "HQ")
+    (play-from-hand state :corp "Ice Wall" "HQ")
+    (play-from-hand state :corp "Code Replicator" "HQ")
+    (take-credits state :corp)
+    (run-on state "HQ")
+    (is (= 3 (:position (get-in @state [:run]))) "Initial position outermost Ice Wall")
+    (let [cr (get-content state :hq 0)
+          i1 (get-ice state :hq 0)
+          i2 (get-ice state :hq 1)
+          i3 (get-ice state :hq 2)]
+      (core/rez state :corp cr)
+      (is (= 5 (:credit (get-corp))))
+      (core/rez state :corp i3)
+      (run-continue state)
+      (is (= 2 (:position (get-in @state [:run]))) "Passed Ice Wall")
+      (card-ability state :corp cr 0)
+      (is (= 3 (:position (get-in @state [:run]))) "Runner approaching previous Ice Wall")
+      (is (empty? (get-content state :hq))
+          "Code Replicatior trashed from root of HQ"))))
+
 (deftest corporate-troubleshooter
   ;; Corporate Troubleshooter - Pay X credits and trash to add X strength to a piece of rezzed ICE
   (do-game
@@ -354,6 +382,22 @@
     (run-empty-server state "HQ")
     (is (= 2 (:credit (get-runner))) "No Desperado or Temujin credits")
     (is (not (:successful-run (:register (get-runner)))) "No successful run in register")))
+
+(deftest crisium-grid-gauntlet
+  ;; Crisium Grid with Gauntlet #3082
+  (do-game
+    (new-game (default-corp [(qty "Crisium Grid" 2)(qty "Vanilla" 2)])
+              (default-runner [(qty "The Gauntlet" 1) (qty "Temüjin Contract" 1)]))
+    (play-from-hand state :corp "Crisium Grid" "HQ")
+    (play-from-hand state :corp "Vanilla" "HQ")
+    (core/rez state :corp (get-ice state :hq 0))
+    (core/rez state :corp (get-content state :hq 0))
+    (take-credits state :corp)
+    (core/gain state :runner :credit 4)
+    (play-from-hand state :runner "The Gauntlet")
+    (run-on state "HQ")
+    (run-successful state)
+    (is (seq (:prompt (get-runner))) "The Gauntlet has a prompt")))
 
 (deftest cyberdex-virus-suite-purge
   ;; Cyberdex Virus Suite - Purge ability
@@ -555,11 +599,11 @@
     (core/rez state :corp (get-content state :remote1 0))
     (dotimes [n 5]
       (core/click-draw state :corp 1)
-      (prompt-choice :corp "Yes")
+      (prompt-choice :corp (-> (get-corp) :prompt first :choices first))
       (is (= 4 (:credit (get-corp))) "Not charged to install ice")
       (is (= (inc n) (count (get-in @state [:corp :servers :remote1 :ices]))) (str n " ICE protecting Remote1")))
     (core/click-draw state :corp 1)
-    (prompt-choice :corp "Yes")
+    (prompt-choice :corp (-> (get-corp) :prompt first :choices first))
     (is (= 3 (:credit (get-corp))) "Charged to install ice")
     (is (= 6 (count (get-in @state [:corp :servers :remote1 :ices]))) "6 ICE protecting Remote1")))
 

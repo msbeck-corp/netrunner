@@ -60,7 +60,7 @@
                            :msg "gain [Click]" :effect (effect (gain :runner :click 1))}}}
 
    "Aeneas Informant"
-   {:events {:no-trash {:req (req (and (:trash target) (req (not= (first (:zone target)) :discard))))
+   {:events {:no-trash {:req (req (and (:trash target) (not= (first (:zone target)) :discard)))
                         :optional {:prompt (msg "Use Aeneas Informant?")
                                    :yes-ability {:msg (msg (str "gain 1 [Credits] and reveal " (:title target)))
                                                  :effect (effect (gain :credit 1))}}}}}
@@ -431,6 +431,26 @@
                  :msg "prevent up to 3 meat damage"
                  :effect (effect (trash card {:cause :ability-cost}) (damage-prevent :meat 3))}]}
 
+   "Crypt"
+   {:events {:successful-run
+             {:silent (req true)
+              :req (req (= :archives target))
+              :optional {:prompt "Place a virus counter on Crypt?"
+                         :yes-ability {:effect (effect (add-counter card :virus 1)
+                                                       (system-msg "places a virus counter on Crypt"))}}}}
+    :abilities [{:label "[Click][Trash]: install a virus program from the stack"
+                 :prompt "Choose a virus"
+                 :msg (msg "install " (:title target) " from the stack")
+                 :choices (req (cancellable (filter #(and (is-type? % "Program")
+                                                          (has-subtype? % "Virus"))
+                                                    (:deck runner)) :sorted))
+                 :cost [:click 1]
+                 :counter-cost [:virus 3]
+                 :effect (effect (trigger-event :searched-stack nil)
+                                 (shuffle! :deck)
+                                 (runner-install target)
+                                 (trash card {:cause :ability-cost}))}]}
+
    "Dadiana Chacon"
    (let [trashme {:effect (effect (system-msg "trashes Dadiana Chacon and suffers 3 meat damage")
                                   (damage eid :meat 3 {:unboostable true :card card})
@@ -682,6 +702,14 @@
                                    (set (get-in @state [:corp :servers :hq :content])))
                                  card nil))))}}}
 
+   "Gbahali"
+   {:abilities [{:label "[Trash]: Break the last subroutine on the encountered piece of ice"
+                 :req (req (and (:run @state) (rezzed? current-ice)))
+                 :effect (effect (trash card {:cause :ability-cost})
+                                 (system-msg :runner
+                                             (str "trashes Gbahali to break the last subroutine on "
+                                                  (:title current-ice))))}]}
+
    "Gene Conditioning Shoppe"
    {:msg "make Genetics trigger a second time each turn"
     :effect (effect (register-persistent-flag! card :genetics-trigger-twice (constantly true)))
@@ -868,7 +896,7 @@
    {:abilities [{:label "[Trash]: Break the first subroutine on the encountered piece of ice"
                  :req (req (and (:run @state) (rezzed? current-ice)))
                  :effect (effect (trash card {:cause :ability-cost})
-                                 (system-msg :corp
+                                 (system-msg :runner
                                              (str "trashes Kongamato to break the first subroutine on "
                                                   (:title current-ice))))}]}
 
@@ -1475,6 +1503,7 @@
     :abilities [{:req (req (not (install-locked? state side)))
                  :prompt "Choose a card on Street Peddler to install"
                  :choices (req (cancellable (filter #(and (not (is-type? % "Event"))
+                                                          (runner-can-install? state side % nil)
                                                           (can-pay? state side nil (modified-install-cost state side % [:credit -1])))
                                                     (:hosted card))))
                  :msg (msg "install " (:title target) " lowering its install cost by 1 [Credits]")

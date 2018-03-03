@@ -123,8 +123,11 @@
           (continue-ability state :runner
                             {:cost [:credit trash-cost]
                              :delayed-completion true
-                             :effect (req (trash state side eid card nil)
+                             :effect (req (when (:run @state)
+                                            (swap! state assoc-in [:run :did-trash] true)
+                                            (swap! state assoc-in [:run :did-access] true))
                                           (swap! state assoc-in [:runner :register :trashed-card] true)
+                                          (trash state side eid card nil)
                                           (system-msg state side (str "is forced to pay " trash-msg)))}
                             card nil)
           ;; Otherwise, show the option to pay to trash the card.
@@ -135,18 +138,20 @@
             (when-not (find-cid (:cid card) (get-in @state [:corp :discard]))
               (continue-ability state :runner
                                 {:optional
-                                 {:prompt (str "Pay " trash-cost " [Credits] to trash " name "?")
+                                 {:delayed-completion true
+                                  :prompt (str "Pay " trash-cost " [Credits] to trash " name "?")
                                   :no-ability {:effect (req
                                                          ;; toggle access flag to prevent Hiro issue #2638
                                                          (swap! state dissoc :access)
                                                          (trigger-event state side :no-trash c)
-                                                         (swap! state assoc :access true))}
+                                                         (swap! state assoc :access true)
+                                                         (effect-completed state side eid))}
                                   :yes-ability {:cost [:credit trash-cost]
                                                 :delayed-completion true
-                                                :effect (req (trash state side eid card nil)
-                                                             (when (:run @state)
+                                                :effect (req (when (:run @state)
                                                                (swap! state assoc-in [:run :did-trash] true))
                                                              (swap! state assoc-in [:runner :register :trashed-card] true)
+                                                             (trash state side eid card nil)
                                                              (system-msg state side (str "pays " trash-msg)))}}}
                                 card nil)))))
       ;; The card does not have a trash cost
@@ -167,9 +172,10 @@
              (if (= target "Don't steal")
                (continue-ability state :runner
                                  {:delayed-completion true
-                                  :effect (effect (system-msg (str "decides not to pay to steal " (:title card)))
-                                                  (trigger-event :no-steal card)
-                                                  (resolve-steal-events eid card))} card nil)
+                                  :effect (req (when-not (find-cid (:cid card) (:deck corp))
+                                                    (system-msg state side (str "decides not to pay to steal " (:title card))))
+                                                  (trigger-event state side :no-steal card)
+                                                  (resolve-steal-events state side eid card))} card nil)
                (let [name (:title card)
                      chosen (cons target chosen)
                      clicks (count (re-seq #"\[Click\]+" target))
@@ -234,10 +240,10 @@
   ([state side cards]
    (msg-handle-access state side cards (:title (first cards))))
   ([state side cards title]
-   (system-msg state side
-               (str "accesses " title
-                    (when (pos? (count cards))
-                      (str " from " (->> cards first :zone (name-zone side))))))))
+   (let [msg (str "accesses " title
+                  (when (pos? (count cards))
+                    (str " from " (->> cards first :zone (name-zone side)))))]
+     (system-msg state side msg))))
 
 (defn handle-access
   "Apply game rules for accessing the given list of cards (which generally only contains 1 card.)"
@@ -423,14 +429,14 @@
   {:delayed-completion true
    :effect (req (if (pos? (count cards))
                   (if (= 1 (count cards))
-                    (handle-access state side eid cards "an unseen card from R&D")
+                    (handle-access state side eid cards "an unseen card")
                     (let [from-rd (access-count state side :rd-access)]
                       (continue-ability state side (access-helper-hq-or-rd
                                                      state :rd "deck" from-rd
                                                      ;; access the first card in deck that has not been accessed.
                                                      (fn [already-accessed] (first (drop-while already-accessed
                                                                                                (-> @state :corp :deck))))
-                                                     (fn [_] "an unseen card from R&D")
+                                                     (fn [_] "an unseen card")
                                                      #{})
                                         card nil)))
                   (effect-completed state side eid)))})
@@ -629,7 +635,8 @@
    (swap! state assoc-in [:run :successful] true)
    (when-completed (trigger-event-simult state side :pre-successful-run nil (first server))
                    (when-completed (trigger-event-simult state side :successful-run nil (first (get-in @state [:run :server])))
-                                   (effect-completed state side eid nil)))))
+                                   (when-completed (trigger-event-simult state side :post-successful-run nil (first (get-in @state [:run :server])))
+                                                   (effect-completed state side eid nil))))))
 
 (defn- successful-run-trigger
   "The real 'successful run' trigger."

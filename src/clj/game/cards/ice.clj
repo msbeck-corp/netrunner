@@ -994,36 +994,6 @@
    "Hunter"
    {:subroutines [(tag-trace 3)]}
 
-   "Jua"
-   {:implementation "Encounter effect is manual"
-    :abilities [{:msg "prevent the Runner from installing cards for the rest of the turn"
-                 :effect (effect (lock-install (:cid card) :runner)
-                                 (register-events {:runner-turn-ends
-                                                   {:effect (effect (unlock-install (:cid card) :runner)
-                                                                    (unregister-events card))}}
-                                                  card))}]
-    :events {:runner-turn-ends nil}
-    :subroutines [{:label "Choose 2 installed Runner cards, if able. The Runner must add 1 of those to the top of the Stack."
-                   :req (req (>= (count (all-installed state :runner)) 2))
-                   :delayed-completion true
-                   :prompt "Select 2 installed Runner cards"
-                   :choices {:req #(and (= (:side %) "Runner") (installed? %)) :max 2 :all true}
-                   :msg (msg "add either " (card-str state (first targets)) " or " (card-str state (second targets)) " to the Stack")
-                   :effect (req (when (= (count targets) 2)
-                                     (show-wait-prompt state :corp "Runner to decide which card to move")
-                                     (continue-ability
-                                       state
-                                       :runner
-                                        {:player :runner
-                                         :priority 1
-                                         :prompt "Select a card to move to the Stack"
-                                         :choices [(card-str state (first targets)) (card-str state (second targets))]
-                                         :effect (req (let [c (installed-byname state :runner target)]
-                                                        (clear-wait-prompt state :corp)
-                                                        (move state :runner c :deck {:front true})
-                                                        (system-msg state :runner (str "selected " (:title c) " to move to the Stack"))))}
-                                         card nil)))}]}
-
    "Ice Wall"
    {:advanceable :always
     :subroutines [end-the-run]
@@ -1099,6 +1069,36 @@
    "Janus 1.0"
    {:subroutines [(do-brain-damage 1)]
     :runner-abilities [(runner-break [:click 1] 1)]}
+
+   "Jua"
+   {:implementation "Encounter effect is manual"
+    :abilities [{:msg "prevent the Runner from installing cards for the rest of the turn"
+                 :effect (effect (lock-install (:cid card) :runner)
+                                 (register-events {:runner-turn-ends
+                                                   {:effect (effect (unlock-install (:cid card) :runner)
+                                                                    (unregister-events card))}}
+                                                  card))}]
+    :events {:runner-turn-ends nil}
+    :subroutines [{:label "Choose 2 installed Runner cards, if able. The Runner must add 1 of those to the top of the Stack."
+                   :req (req (>= (count (all-installed state :runner)) 2))
+                   :delayed-completion true
+                   :prompt "Select 2 installed Runner cards"
+                   :choices {:req #(and (= (:side %) "Runner") (installed? %)) :max 2 :all true}
+                   :msg (msg "add either " (card-str state (first targets)) " or " (card-str state (second targets)) " to the Stack")
+                   :effect (req (when (= (count targets) 2)
+                                     (show-wait-prompt state :corp "Runner to decide which card to move")
+                                     (continue-ability
+                                       state
+                                       :runner
+                                        {:player :runner
+                                         :priority 1
+                                         :prompt "Select a card to move to the Stack"
+                                         :choices [(card-str state (first targets)) (card-str state (second targets))]
+                                         :effect (req (let [c (installed-byname state :runner target)]
+                                                        (clear-wait-prompt state :corp)
+                                                        (move state :runner c :deck {:front true})
+                                                        (system-msg state :runner (str "selected " (:title c) " to move to the Stack"))))}
+                                         card nil)))}]}
 
    "Kakugo"
    {:events {:pass-ice {:delayed-completion true
@@ -1428,6 +1428,36 @@
                                         (= (:side %) "Corp"))}
                    :effect (effect (corp-install target nil))
                    :msg (msg (corp-install-msg target))}]}
+
+   "NEXT Sapphire"
+   {:subroutines [{:label "Draw up to X cards"
+                   :prompt "Draw how many cards?"
+                   :msg (msg "draw " target " cards")
+                   :choices {:number (req (next-ice-count corp))
+                             :default (req 1)}
+                   :delayed-completion true
+                   :effect (effect (draw eid target nil))}
+                  {:label "Add up to X cards from Archives to HQ"
+                   :prompt "Select cards to add to HQ"
+                   :show-discard  true
+                   :choices {:req #(and (= "Corp" (:side %)) (= [:discard] (:zone %)))
+                             :max (req (next-ice-count corp))}
+                   :effect (req (doseq [c targets] (move state side c :hand)))
+                   :msg (msg "add "
+                             (let [seen (filter :seen targets)
+                                   m (count (filter #(not (:seen %)) targets))]
+                               (str (join ", " (map :title seen))
+                                    (when (pos? m)
+                                      (str (when-not (empty? seen) " and ")
+                                           (quantify m "unseen card")))))
+                             " to HQ")}
+                  {:label "Shuffle up to X cards from HQ into R&D"
+                   :prompt "Select cards to shuffle into R&D"
+                   :choices {:req #(and (= "Corp" (:side %)) (= [:hand] (:zone %)))
+                             :max (req (next-ice-count corp))}
+                   :effect (req (doseq [c targets] (move state side c :deck))
+                                (shuffle! state side :deck))
+                   :msg (msg "shuffle " (count targets) " cards from HQ into R&D")}]}
 
    "NEXT Silver"
    {:abilities [{:label "Gain subroutines"
